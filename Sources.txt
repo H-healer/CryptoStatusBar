@@ -1,0 +1,9 @@
+CryptoStatusBar.swift
+Models/CryptoProduct.swift
+Models/AppSettings.swift
+Services/CryptoService.swift
+ViewModels/StatusBarViewModel.swift
+Views/SettingsView.swift
+Views/ProductListView.swift
+Utilities/EventMonitor.swift
+Utilities/NotificationManager.swift 

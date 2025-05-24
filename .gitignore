@@ -1,0 +1,32 @@
+.DS_Store
+.idea
+.vscode
+.cursorrules
+.cursorignore
+.build
+
+# 打包后的应用程序
+*.app
+*.app.dSYM.zip
+*.ipa
+*.pkg
+*.dmg
+
+# Xcode相关
+xcuserdata/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcworkspace/contents.xcworkspacedata
+**/xcshareddata/WorkspaceSettings.xcsettings
+
+# Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+.swiftpm/
+
+# 项目特定文件
+CryptoStatusBar.app
+launch.sh
