@@ -468,44 +468,14 @@ struct FavoriteRowView: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.01))
     }
     
-    // 价格颜色
+    // 价格颜色 - 使用工具类
     private var priceColor: Color {
-        // 获取价格颜色方案
-        let colorScheme = AppSettings.shared.priceColorScheme
-        
-        switch product.priceChangeDirection {
-        case .up:
-            return colorScheme == .chinese ? .red : .green
-        case .down:
-            return colorScheme == .chinese ? .green : .red
-        case .unchanged:
-            return .primary
-        }
+        PriceColorHelper.priceColor(for: product)
     }
-    
-    // 价格变动颜色
-    private var changeColor: Color {
-        // 使用设置中选择的涨跌幅计算模式
-        let changePercent = product.getPriceChangePercent(mode: AppSettings.shared.priceChangeCalculationMode)
-        
-        // 获取价格颜色方案
-        let colorScheme = AppSettings.shared.priceColorScheme
-        
-        if changePercent > 0 {
-            return colorScheme == .chinese ? .red : .green
-        } else if changePercent < 0 {
-            return colorScheme == .chinese ? .green : .red
-        } else {
-            return .gray
-        }
-    }
-    
-    // 返回涨跌幅文本视图
+
+    // 返回涨跌幅文本视图 - 使用可复用组件
     private func getPriceChangeText() -> some View {
-        let mode = AppSettings.shared.priceChangeCalculationMode
-        return Text(product.formattedPriceChangePercent(mode: mode))
-            .font(.caption.monospacedDigit())
-            .foregroundColor(changeColor)
+        PriceChangeText(product: product)
     }
 }
 
@@ -514,20 +484,39 @@ struct AllProductsListView: View {
     let products: [CryptoProduct]
     let favorites: [CryptoProduct]
     let cryptoService: CryptoService
-    
+
     // 判断是否已收藏
     private func isFavorite(_ product: CryptoProduct) -> Bool {
         return favorites.contains { $0.instId == product.instId }
     }
-    
+
     var body: some View {
         if products.isEmpty {
-            VStack {
+            // 改进的加载状态视图
+            VStack(spacing: 16) {
                 ProgressView()
+                    .scaleEffect(1.2)
                     .padding()
-                
-                Text("加载中...")
+
+                Text("正在加载产品列表...")
                     .font(.headline)
+
+                Text("首次加载可能需要几秒钟")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                // 连接状态提示
+                if cryptoService.connectionStatus != .connected {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(cryptoService.connectionStatus == .connecting ? Color.yellow : Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(cryptoService.connectionStatus.rawValue)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 8)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -628,44 +617,14 @@ struct CryptoProductRow: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.01)) // 透明背景使整行可点击
     }
     
-    // 价格颜色
+    // 价格颜色 - 使用工具类
     private var priceColor: Color {
-        // 获取价格颜色方案
-        let colorScheme = AppSettings.shared.priceColorScheme
-        
-        switch product.priceChangeDirection {
-        case .up:
-            return colorScheme == .chinese ? .red : .green
-        case .down:
-            return colorScheme == .chinese ? .green : .red
-        case .unchanged:
-            return .primary
-        }
+        PriceColorHelper.priceColor(for: product)
     }
-    
-    // 价格变动颜色
-    private var changeColor: Color {
-        // 使用设置中选择的涨跌幅计算模式
-        let changePercent = product.getPriceChangePercent(mode: AppSettings.shared.priceChangeCalculationMode)
-        
-        // 获取价格颜色方案
-        let colorScheme = AppSettings.shared.priceColorScheme
-        
-        if changePercent > 0 {
-            return colorScheme == .chinese ? .red : .green
-        } else if changePercent < 0 {
-            return colorScheme == .chinese ? .green : .red
-        } else {
-            return .gray
-        }
-    }
-    
-    // 返回涨跌幅文本视图
+
+    // 返回涨跌幅文本视图 - 使用可复用组件
     private func getPriceChangeText() -> some View {
-        let mode = AppSettings.shared.priceChangeCalculationMode
-        return Text(product.formattedPriceChangePercent(mode: mode))
-            .font(.caption.monospacedDigit())
-            .foregroundColor(changeColor)
+        PriceChangeText(product: product)
     }
 }
 

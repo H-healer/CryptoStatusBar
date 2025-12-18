@@ -223,14 +223,14 @@ struct SettingsView: View {
                             }
                             
                             VStack(alignment: .leading) {
-                                Text("刷新间隔: \(Int(refreshInterval))秒")
+                                Text("备用刷新间隔: \(Int(refreshInterval))秒")
                                 Slider(value: $refreshInterval, in: 10...300, step: 10)
                                     .frame(maxWidth: .infinity)
                                     .onChange(of: refreshInterval) { newValue in
                                         settings.saveRefreshInterval(newValue)
                                     }
-                                
-                                Text("设置自动刷新数据的时间间隔，较短的间隔可获取更实时的数据，但会增加网络流量")
+
+                                Text("注意：价格通过实时连接自动更新（每秒多次），此设置不影响实时更新频率。此间隔仅用于网络异常时的备用刷新，一般无需调整")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .padding(.top, 2)

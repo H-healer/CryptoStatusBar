@@ -173,16 +173,17 @@ class CryptoService: ObservableObject {
                 
                 switch message {
                 case .string(let text):
+                    // WebSocket保持实时接收，但使用简单的节流避免过度处理
                     // 快速检查消息中是否包含当前显示的币种，只处理相关消息或达到处理阈值的消息
                     let containsCurrentCoin = currentDisplayId != nil && text.contains(currentDisplayId!)
-                    
+
                     if containsCurrentCoin || shouldProcess {
                         // 使用最低优先级处理消息
                         DispatchQueue.global(qos: .background).async {
                         self.handleMessage(text)
                         }
                     }
-                        
+
                     // 立即开始接收下一条消息，不等待处理完成
                         DispatchQueue.main.async {
                             self.receiveMessage()
@@ -197,7 +198,7 @@ class CryptoService: ObservableObject {
                             }
                         }
                         }
-                        
+
                     // 立即开始接收下一条消息
                         DispatchQueue.main.async {
                             self.receiveMessage()
@@ -1299,15 +1300,19 @@ class CryptoService: ObservableObject {
         // 停止定时器
         updateTimer?.invalidate()
         updateTimer = nil
-        
+
         // 停止ping定时器
         pingTimer?.invalidate()
         pingTimer = nil
-        
+
+        // 停止汇率刷新定时器
+        exchangeRateTimer?.invalidate()
+        exchangeRateTimer = nil
+
         // 取消重连计划
         reconnectWorkItem?.cancel()
         reconnectWorkItem = nil
-        
+
         // 清空订阅列表
         subscribedProducts.removeAll()
     }
@@ -1528,22 +1533,29 @@ class CryptoService: ObservableObject {
         logger.debug("已应用缓存的价格数据")
     }
     
-    // 保存价格缓存
+    // 保存价格缓存 - 优化：只缓存收藏的产品
     private func savePriceCache() {
+        // 只缓存收藏产品的价格，减少存储空间和内存占用
         var priceDict: [String: Double] = [:]
-        for product in products where product.currentPrice > 0 {
+        for product in favoriteProducts where product.currentPrice > 0 {
             priceDict[product.instId] = product.currentPrice
         }
-        
+
+        // 如果没有收藏产品，不保存缓存
+        guard !priceDict.isEmpty else {
+            logger.debug("没有收藏产品需要缓存")
+            return
+        }
+
         let cacheData: [String: Any] = [
             "timestamp": Date().timeIntervalSince1970,
             "prices": priceDict
         ]
-        
+
         UserDefaults.standard.set(cacheData, forKey: cacheKey)
         UserDefaults.standard.synchronize()
-        
-        logger.debug("已缓存 \(priceDict.count) 个产品的价格")
+
+        logger.debug("已缓存 \(priceDict.count) 个收藏产品的价格")
     }
     
     // 加载收藏列表
@@ -1782,49 +1794,162 @@ class CryptoService: ObservableObject {
         logger.info("已从收藏中移除 \(product.instId)")
     }
     
+    // 标记是否已注册刷新间隔观察者
+    private var hasRegisteredRefreshIntervalObserver = false
+
+    // 汇率刷新定时器
+    private var exchangeRateTimer: Timer?
+
     // 更新定时器设置
     private func setupUpdateTimer() {
         // 使用AppSettings中的刷新间隔
         let refreshInterval = AppSettings.shared.refreshInterval
-        
+
         // 取消旧的定时器
         updateTimer?.invalidate()
         updateTimer = nil
-        
+
         logger.info("设置更新定时器，刷新间隔: \(refreshInterval) 秒")
-        
-        // 使用用户设置的间隔创建定时器
+
+        // 使用用户设置的间隔创建定时器 - 这个定时器控制定期数据刷新
         updateTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            
+
+            self.logger.info("定时刷新触发: 间隔 \(refreshInterval) 秒")
+
             // 保存价格缓存
             self.savePriceCache()
-            
-            // 如果有收藏的产品，刷新它们的价格
+
+            // 定期通过HTTP API获取最新价格，确保数据准确性
             if !self.favoriteProducts.isEmpty {
-                self.logger.info("定时刷新: 正在更新收藏产品数据")
-                self.refreshFavoriteProducts()
+                self.logger.info("定时刷新: 通过HTTP API更新收藏产品数据")
+                self.fetchLatestPricesViaHTTP()
+            }
+
+            // 如果WebSocket连接异常，尝试重连
+            if self.connectionStatus != .connected {
+                self.logger.info("WebSocket未连接，尝试重新连接")
+                self.reconnect()
             }
         }
-        
-        // 添加观察者，当设置变化时更新定时器
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleRefreshIntervalChanged),
-            name: NSNotification.Name("RefreshIntervalChanged"),
-            object: nil
-        )
-        
-        // 每两小时自动刷新一次汇率
-        Timer.scheduledTimer(withTimeInterval: 7200, repeats: true) { [weak self] _ in
-            self?.fetchExchangeRate()
+
+        // 只注册一次观察者，避免重复注册
+        if !hasRegisteredRefreshIntervalObserver {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRefreshIntervalChanged),
+                name: NSNotification.Name("RefreshIntervalChanged"),
+                object: nil
+            )
+            hasRegisteredRefreshIntervalObserver = true
+        }
+
+        // 每两小时自动刷新一次汇率（只创建一次）
+        if exchangeRateTimer == nil {
+            exchangeRateTimer = Timer.scheduledTimer(withTimeInterval: 7200, repeats: true) { [weak self] _ in
+                self?.fetchExchangeRate()
+            }
         }
     }
     
     // 处理刷新间隔变化的方法
     @objc private func handleRefreshIntervalChanged() {
-        logger.info("检测到刷新间隔设置变更，更新定时器")
-        setupUpdateTimer() // 重新设置定时器
+        let newInterval = AppSettings.shared.refreshInterval
+        logger.info("检测到刷新间隔设置变更为 \(newInterval) 秒，重新设置定时器")
+
+        // 确保在主线程上重新设置定时器
+        if Thread.isMainThread {
+            // 重新设置定时器
+            setupUpdateTimer()
+
+            // 立即触发一次刷新，让用户看到效果
+            if !favoriteProducts.isEmpty {
+                logger.info("设置变更后立即刷新数据")
+                fetchLatestPricesViaHTTP()
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.setupUpdateTimer()
+
+                if !self.favoriteProducts.isEmpty {
+                    self.logger.info("设置变更后立即刷新数据")
+                    self.fetchLatestPricesViaHTTP()
+                }
+            }
+        }
+    }
+
+    // 通过HTTP API获取最新价格（作为WebSocket的备用方案）
+    private func fetchLatestPricesViaHTTP() {
+        guard !favoriteProducts.isEmpty else { return }
+
+        logger.info("通过HTTP API获取最新价格，共 \(self.favoriteProducts.count) 个产品")
+
+        // 按产品类型分组获取数据
+        let productsByType = Dictionary(grouping: favoriteProducts) { $0.productType }
+
+        for (productType, products) in productsByType {
+            // OKX API endpoint for ticker data - 获取该类型的所有产品
+            let urlString = "https://www.okx.com/api/v5/market/tickers?instType=\(productType.rawValue)"
+
+            guard let url = URL(string: urlString) else {
+                logger.error("无效的API URL: \(urlString)")
+                continue
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 10.0
+
+            // 需要更新的产品ID集合
+            let targetInstIds = Set(products.map { $0.instId })
+
+            urlSession?.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else { return }
+
+                if let error = error {
+                    self.logger.error("HTTP API请求失败 (\(productType.rawValue)): \(error.localizedDescription)")
+                    return
+                }
+
+                guard let data = data else {
+                    self.logger.error("HTTP API返回空数据 (\(productType.rawValue))")
+                    return
+                }
+
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let dataArray = json["data"] as? [[String: Any]] {
+
+                        var updatedCount = 0
+
+                        DispatchQueue.main.async {
+                            for productData in dataArray {
+                                if let instId = productData["instId"] as? String,
+                                   targetInstIds.contains(instId),
+                                   let lastPriceStr = productData["last"] as? String,
+                                   let lastPrice = Double(lastPriceStr) {
+
+                                    // 更新对应产品的价格
+                                    self.updateSingleFavoritePrice(instId: instId, newPrice: lastPrice)
+                                    updatedCount += 1
+                                }
+                            }
+
+                            self.logger.info("HTTP API更新了 \(updatedCount) 个 \(productType.rawValue) 产品价格")
+
+                            // 通知UI更新
+                            self.objectWillChange.send()
+                            NotificationCenter.default.post(name: NSNotification.Name("PriceUpdated"), object: nil)
+                        }
+                    }
+                } catch {
+                    self.logger.error("解析HTTP API响应失败 (\(productType.rawValue)): \(error.localizedDescription)")
+                }
+            }.resume()
+        }
     }
     
     // 加载缓存的汇率

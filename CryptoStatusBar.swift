@@ -182,12 +182,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil
             )
             
-            // 作为备份，仍然保留定时器，但降低频率至1秒
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                guard let self = self else { return }
-                // 仅作为备份刷新机制
-                self.updateStatusBarDisplay()
-    }
+            // 移除固定的1秒定时器，改为监听设置变化来动态调整
+            // 状态栏显示更新现在完全依赖数据变化触发，而不是定时器
     
             // 设置菜单
             setupMenu()
